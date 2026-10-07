@@ -124,3 +124,4 @@ Debe responder algo como:
 ```
 
 Si `geminiConfigured` aparece como `false`, falta configurar el secreto `GEMINI_API_KEY`.
+Deployment initialized
