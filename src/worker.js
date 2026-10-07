@@ -1,45 +1,36 @@
 const COUNTRIES = {
-  CO: { nombre: 'Colombia', moneda: 'COP', tasa: 4000, horas: 210, smlv: 1423500 },
-  DO: { nombre: 'Dominican Republic', moneda: 'DOP', tasa: 62, horas: 190, smlv: 25000 },
-  MX: { nombre: 'Mexico', moneda: 'MXN', tasa: 18.5, horas: 208, smlv: 8364 },
-  PE: { nombre: 'Peru', moneda: 'PEN', tasa: 3.7, horas: 208, smlv: 1130 },
-  CL: { nombre: 'Chile', moneda: 'CLP', tasa: 950, horas: 180, smlv: 529000 },
-  CR: { nombre: 'Costa Rica', moneda: 'CRC', tasa: 510, horas: 208, smlv: 365000 },
+  CO: { nombre: "Colombia", moneda: "COP", tasa: 4000, horas: 210, smlv: 1423500, domain: "co" },
+  DO: { nombre: "Dominican Republic", moneda: "DOP", tasa: 62, horas: 190, smlv: 25000, domain: "do" },
+  MX: { nombre: "Mexico", moneda: "MXN", tasa: 18.5, horas: 208, smlv: 8364, domain: "mx" },
+  PE: { nombre: "Peru", moneda: "PEN", tasa: 3.7, horas: 208, smlv: 1130, domain: "pe" },
+  CL: { nombre: "Chile", moneda: "CLP", tasa: 950, horas: 180, smlv: 529000, domain: "cl" },
+  CR: { nombre: "Costa Rica", moneda: "CRC", tasa: 510, horas: 208, smlv: 365000, domain: "cr" },
 };
 
-const LANG = {
-  es: 'Spanish',
-  en: 'English',
-  pt: 'Portuguese'
-};
-
-const ENGLISH = new Set([
-  'No requerido',
-  'Básico',
-  'Intermedio',
-  'Avanzado',
-  'Bilingüe',
-  'No especifica'
-]);
+const LANG = { es: "Spanish", en: "English", pt: "Portuguese" };
+const ENGLISH = new Set(["No requerido", "Básico", "Intermedio", "Avanzado", "Bilingüe", "No especifica"]);
 
 const json = (value, status = 200) =>
   new Response(JSON.stringify(value), {
     status,
     headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'access-control-allow-origin': '*',
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
     },
   });
 
-const key = (text = '') =>
+const key = (text = "") =>
   String(text)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
+
+const slug = (text = "") =>
+  key(text).replace(/\s+/g, "-");
 
 const n = (value) => {
   const x = Number(value);
@@ -48,74 +39,1171 @@ const n = (value) => {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function stripHtml(s = '') {
+function decodeHtml(s = "") {
   return String(s)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, x) => String.fromCharCode(Number(x)));
+}
+
+function stripHtml(s = "") {
+  return decodeHtml(String(s))
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function parseJsonArray(text) {
-  const clean = String(text || '')
-    .replace(/```json|```/gi, '')
-    .trim();
+function absoluteUrl(href, base) {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return null;
+  }
+}
 
-  const start = clean.indexOf('[');
-  if (start < 0) return [];
+function parseLinks(html, baseUrl, allowedHosts = []) {
+  const out = [];
+  const seen = new Set();
+  const re = /<a\b[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
 
-  let body = clean.slice(start);
-  const end = body.lastIndexOf(']');
+  while ((m = re.exec(html))) {
+    const url = absoluteUrl(decodeHtml(m[1]), baseUrl);
+    const text = stripHtml(m[2]);
 
-  if (end >= 0) {
+    if (!url || !text || text.length < 3) continue;
+
+    let host;
+
     try {
-      return JSON.parse(body.slice(0, end + 1));
+      host = new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      continue;
+    }
+
+    if (
+      allowedHosts.length &&
+      !allowedHosts.some(
+        h => host === h || host.endsWith("." + h)
+      )
+    ) continue;
+
+    const k = `${url}|${key(text)}`;
+
+    if (seen.has(k)) continue;
+
+    seen.add(k);
+    out.push({ url, text });
+  }
+
+  return out;
+}
+
+function roleVariants(cargo) {
+  const raw = String(cargo || "").trim();
+  const k = key(raw);
+  const variants = new Set([raw]);
+
+  const groups = [
+    {
+      test: /compens|rewards?|remuner/,
+      items: [
+        "Analista de compensación",
+        "Analista de compensaciones",
+        "Analista de compensación y beneficios",
+        "Analista de compensación total",
+        "Compensation Analyst",
+        "Compensation & Benefits Analyst",
+        "Total Rewards Analyst",
+        "Rewards Analyst"
+      ],
+    },
+    {
+      test: /nomina|payroll/,
+      items: [
+        "Analista de nómina",
+        "Payroll Analyst",
+        "Payroll Specialist",
+        "Analista de nómina y compensación"
+      ],
+    },
+    {
+      test: /benefit|beneficio/,
+      items: [
+        "Analista de beneficios",
+        "Benefits Analyst",
+        "Compensation & Benefits Analyst",
+        "Total Rewards Analyst"
+      ],
+    },
+    {
+      test: /recruit|reclut|talent acquisition|seleccion/,
+      items: [
+        "Recruiter",
+        "Talent Acquisition Specialist",
+        "Analista de selección",
+        "Analista de reclutamiento"
+      ],
+    },
+    {
+      test: /human resources|recursos humanos|gestion humana|hr analyst/,
+      items: [
+        "HR Analyst",
+        "Human Resources Analyst",
+        "Analista de Recursos Humanos",
+        "Analista de Gestión Humana"
+      ],
+    },
+  ];
+
+  for (const g of groups) {
+    if (g.test.test(k)) {
+      g.items.forEach(v => variants.add(v));
+    }
+  }
+
+  return [...variants].slice(0, 10);
+}
+
+async function fetchText(url, init = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const r = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+        "accept-language": "es-CO,es;q=0.9,en;q=0.8",
+        "user-agent": "Mozilla/5.0 (compatible; MarketBenchmark/2.0; +https://workers.dev)",
+        ...(init.headers || {}),
+      },
+    });
+
+    if (!r.ok) {
+      throw new Error(`${new URL(url).hostname}: HTTP ${r.status}`);
+    }
+
+    return await r.text();
+
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJson(url, init = {}) {
+  const text = await fetchText(url, init);
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${new URL(url).hostname}: invalid JSON`);
+  }
+}
+
+function listingRecord({ source, url, title, location, description }) {
+  return {
+    source,
+    title: title || "Job listing",
+    company: null,
+    location: location || "",
+    url,
+    date: null,
+    salaryMin: null,
+    salaryMax: null,
+    salaryCurrency: null,
+    salaryPeriod: null,
+    level: null,
+    description: String(description || "").slice(0, 9000),
+  };
+}
+
+/* =========================================================
+   COMPUTRABAJO
+========================================================= */
+
+async function sourceComputrabajo(req, variants) {
+  if (req.pais !== "CO") return [];
+
+  const records = [];
+
+  for (const term of variants.slice(0, 4)) {
+    const url =
+      `https://co.computrabajo.com/trabajo-de-${slug(term)}`;
+
+    try {
+      const html = await fetchText(url);
+
+      const links = parseLinks(
+        html,
+        url,
+        ["co.computrabajo.com"]
+      )
+        .filter(
+          x =>
+            /oferta|empleo|trabajo/i.test(x.url) &&
+            x.text.length > 4
+        )
+        .slice(0, 15);
+
+      if (links.length) {
+        for (const x of links) {
+          records.push(
+            listingRecord({
+              source: "Computrabajo",
+              url: x.url,
+              title: x.text,
+              location: req.ciudad || req.pais,
+              description: stripHtml(html).slice(0, 5000),
+            })
+          );
+        }
+      } else {
+        records.push(
+          listingRecord({
+            source: "Computrabajo",
+            url,
+            title: term,
+            location: req.ciudad || "Colombia",
+            description: stripHtml(html),
+          })
+        );
+      }
+
     } catch {}
   }
 
-  const lastObject = body.lastIndexOf('}');
+  return records;
+}
 
-  if (lastObject >= 0) {
+/* =========================================================
+   EL EMPLEO
+========================================================= */
+
+async function sourceElEmpleo(req, variants) {
+  if (req.pais !== "CO") return [];
+
+  const records = [];
+
+  for (const term of variants.slice(0, 4)) {
+
+    const base =
+      req.ciudad &&
+      key(req.ciudad) === "bogota"
+        ? `https://www.elempleo.com/co/ofertas-empleo/bogota/trabajo-${slug(term)}`
+        : `https://www.elempleo.com/co/ofertas-empleo/trabajo-${slug(term)}`;
+
     try {
-      return JSON.parse(
-        body.slice(0, lastObject + 1) + ']'
+      const html = await fetchText(base);
+
+      const links = parseLinks(
+        html,
+        base,
+        ["elempleo.com"]
+      )
+        .filter(
+          x =>
+            /ofertas-trabajo|oferta-trabajo/i.test(x.url)
+        )
+        .slice(0, 15);
+
+      if (links.length) {
+
+        for (const x of links) {
+
+          records.push(
+            listingRecord({
+              source: "El Empleo",
+              url: x.url,
+              title: x.text,
+              location: req.ciudad || "Colombia",
+              description: stripHtml(html).slice(0, 6000),
+            })
+          );
+        }
+
+      } else {
+
+        records.push(
+          listingRecord({
+            source: "El Empleo",
+            url: base,
+            title: term,
+            location: req.ciudad || "Colombia",
+            description: stripHtml(html),
+          })
+        );
+      }
+
+    } catch {}
+  }
+
+  return records;
+}
+
+/* =========================================================
+   INDEED DIRECT
+========================================================= */
+
+async function sourceIndeed(req, variants) {
+  const country = COUNTRIES[req.pais];
+
+  if (!country) return [];
+
+  const sub = country.domain || "www";
+  const host = `${sub}.indeed.com`;
+
+  const records = [];
+
+  for (const term of variants.slice(0, 3)) {
+
+    const u = new URL(`https://${host}/jobs`);
+
+    u.searchParams.set("q", term);
+
+    if (req.ciudad) {
+      u.searchParams.set("l", req.ciudad);
+    }
+
+    try {
+
+      const html = await fetchText(
+        u.toString()
       );
+
+      const links = parseLinks(
+        html,
+        u.toString(),
+        [host]
+      )
+        .filter(
+          x =>
+            /viewjob|clk\?|rc\/clk|jobs\?/i.test(x.url)
+        )
+        .slice(0, 12);
+
+      for (const x of links) {
+
+        records.push(
+          listingRecord({
+            source: "Indeed",
+            url: x.url,
+            title: x.text,
+            location: req.ciudad || country.nombre,
+            description: stripHtml(html).slice(0, 5000),
+          })
+        );
+      }
+
+    } catch {}
+  }
+
+  return records;
+}
+
+/* =========================================================
+   FREE PUBLIC WEB DISCOVERY
+========================================================= */
+
+function unwrapDuckDuckGo(url) {
+  try {
+
+    const u =
+      new URL(
+        url,
+        "https://html.duckduckgo.com"
+      );
+
+    const uddg =
+      u.searchParams.get("uddg");
+
+    return uddg
+      ? decodeURIComponent(uddg)
+      : u.toString();
+
+  } catch {
+    return url;
+  }
+}
+
+async function discoverDomain(
+  req,
+  variants,
+  domain,
+  sourceName
+) {
+
+  const out = [];
+
+  for (const term of variants.slice(0, 3)) {
+
+    const query =
+      `site:${domain} "${term}" "${COUNTRIES[req.pais].nombre}" ${req.ciudad || ""}`;
+
+    const u =
+      new URL(
+        "https://html.duckduckgo.com/html/"
+      );
+
+    u.searchParams.set(
+      "q",
+      query
+    );
+
+    try {
+
+      const html =
+        await fetchText(
+          u.toString(),
+          {},
+          10000
+        );
+
+      const links =
+        parseLinks(
+          html,
+          u.toString()
+        )
+          .map(
+            x => ({
+              ...x,
+              url:
+                unwrapDuckDuckGo(
+                  x.url
+                )
+            })
+          )
+          .filter(
+            x => {
+              try {
+                const h =
+                  new URL(
+                    x.url
+                  )
+                    .hostname
+                    .replace(
+                      /^www\./,
+                      ""
+                    );
+
+                return (
+                  h === domain ||
+                  h.endsWith(
+                    "." + domain
+                  )
+                );
+
+              } catch {
+                return false;
+              }
+            }
+          )
+          .slice(
+            0,
+            10
+          );
+
+      for (const x of links) {
+
+        out.push(
+          listingRecord({
+            source:
+              sourceName,
+
+            url:
+              x.url,
+
+            title:
+              x.text,
+
+            location:
+              req.ciudad ||
+              COUNTRIES[
+                req.pais
+              ].nombre,
+
+            description:
+              x.text,
+          })
+        );
+      }
+
+    } catch {}
+  }
+
+  return out;
+}
+
+async function sourceMagneto(
+  req,
+  variants
+) {
+
+  return discoverDomain(
+    req,
+    variants,
+    "magneto365.com",
+    "Magneto"
+  );
+}
+
+async function sourceIndeedDiscovery(
+  req,
+  variants
+) {
+
+  const domain =
+    req.pais === "CO"
+      ? "co.indeed.com"
+      : "indeed.com";
+
+  return discoverDomain(
+    req,
+    variants,
+    domain,
+    "Indeed"
+  );
+}
+
+/* =========================================================
+   JOBICY
+========================================================= */
+
+async function sourceJobicy(
+  req,
+  variants
+) {
+
+  const all = [];
+
+  for (
+    const term
+    of variants.slice(0, 3)
+  ) {
+
+    try {
+
+      const u =
+        new URL(
+          "https://jobicy.com/api/v2/remote-jobs"
+        );
+
+      u.searchParams.set(
+        "count",
+        "100"
+      );
+
+      u.searchParams.set(
+        "tag",
+        term
+      );
+
+      const data =
+        await fetchJson(
+          u.toString()
+        );
+
+      for (
+        const j
+        of (data.jobs || [])
+      ) {
+
+        all.push({
+          source:
+            "Jobicy",
+
+          title:
+            j.jobTitle,
+
+          company:
+            j.companyName,
+
+          location:
+            j.jobGeo ||
+            "Remote",
+
+          url:
+            j.url,
+
+          date:
+            j.pubDate
+              ? String(
+                  j.pubDate
+                ).slice(
+                  0,
+                  10
+                )
+              : null,
+
+          salaryMin:
+            j.salaryMin ??
+            null,
+
+          salaryMax:
+            j.salaryMax ??
+            null,
+
+          salaryCurrency:
+            j.salaryCurrency ??
+            null,
+
+          salaryPeriod:
+            j.salaryPeriod ??
+            null,
+
+          level:
+            j.jobLevel ??
+            null,
+
+          description:
+            stripHtml(
+              j.jobDescription ||
+              j.jobExcerpt ||
+              ""
+            ).slice(
+              0,
+              7000
+            ),
+        });
+      }
+
+    } catch {}
+  }
+
+  return all;
+}
+
+/* =========================================================
+   REMOTIVE
+========================================================= */
+
+async function sourceRemotive(
+  req,
+  variants
+) {
+
+  const all = [];
+
+  for (
+    const term
+    of variants.slice(0, 3)
+  ) {
+
+    try {
+
+      const u =
+        new URL(
+          "https://remotive.com/api/remote-jobs"
+        );
+
+      u.searchParams.set(
+        "search",
+        term
+      );
+
+      u.searchParams.set(
+        "limit",
+        "50"
+      );
+
+      const data =
+        await fetchJson(
+          u.toString()
+        );
+
+      for (
+        const j
+        of (data.jobs || [])
+      ) {
+
+        all.push({
+          source:
+            "Remotive",
+
+          title:
+            j.title,
+
+          company:
+            j.company_name,
+
+          location:
+            j.candidate_required_location ||
+            "Remote",
+
+          url:
+            j.url,
+
+          date:
+            j.publication_date
+              ? String(
+                  j.publication_date
+                ).slice(
+                  0,
+                  10
+                )
+              : null,
+
+          salaryMin:
+            null,
+
+          salaryMax:
+            null,
+
+          salaryCurrency:
+            null,
+
+          salaryPeriod:
+            null,
+
+          level:
+            null,
+
+          description:
+            stripHtml(
+              `${j.salary || ""} ${j.description || ""}`
+            ).slice(
+              0,
+              7000
+            ),
+        });
+      }
+
+    } catch {}
+  }
+
+  return all;
+}
+
+/* =========================================================
+   DEDUPLICATE
+========================================================= */
+
+function dedupeCandidates(
+  rows
+) {
+
+  const seen =
+    new Set();
+
+  const out =
+    [];
+
+  for (
+    const r
+    of rows
+  ) {
+
+    if (
+      !r?.url ||
+      !r?.title
+    ) {
+      continue;
+    }
+
+    const k =
+      key(
+        `${r.url}|${r.title}|${r.company || ""}`
+      );
+
+    if (
+      seen.has(k)
+    ) {
+      continue;
+    }
+
+    seen.add(k);
+    out.push(r);
+  }
+
+  return out;
+}
+
+/* =========================================================
+   FETCH DETAILS
+========================================================= */
+
+async function enrichDetails(
+  rows
+) {
+
+  const detailEligible =
+    rows
+      .filter(
+        r =>
+          /Computrabajo|El Empleo|Indeed|Magneto/i
+            .test(
+              r.source
+            )
+      )
+      .slice(
+        0,
+        24
+      );
+
+  const results =
+    await Promise.allSettled(
+      detailEligible.map(
+        async r => {
+
+          try {
+
+            const html =
+              await fetchText(
+                r.url,
+                {},
+                9000
+              );
+
+            return {
+              ...r,
+
+              description:
+                stripHtml(
+                  html
+                ).slice(
+                  0,
+                  10000
+                )
+            };
+
+          } catch {
+
+            return r;
+          }
+        }
+      )
+    );
+
+  const detailed =
+    results.map(
+      (x, i) =>
+        x.status ===
+        "fulfilled"
+          ? x.value
+          : detailEligible[i]
+    );
+
+  const map =
+    new Map(
+      detailed.map(
+        r => [
+          r.url,
+          r
+        ]
+      )
+    );
+
+  return rows.map(
+    r =>
+      map.get(
+        r.url
+      ) ||
+      r
+  );
+}
+
+/* =========================================================
+   COLLECT ALL SOURCES
+========================================================= */
+
+async function collectJobs(
+  req
+) {
+
+  const variants =
+    roleVariants(
+      req.cargo
+    );
+
+  const tasks = [
+    sourceComputrabajo(
+      req,
+      variants
+    ),
+
+    sourceElEmpleo(
+      req,
+      variants
+    ),
+
+    sourceIndeed(
+      req,
+      variants
+    ),
+
+    sourceMagneto(
+      req,
+      variants
+    ),
+
+    sourceIndeedDiscovery(
+      req,
+      variants
+    ),
+
+    sourceJobicy(
+      req,
+      variants
+    ),
+
+    sourceRemotive(
+      req,
+      variants
+    ),
+  ];
+
+  const settled =
+    await Promise.allSettled(
+      tasks
+    );
+
+  let rows =
+    settled
+      .filter(
+        x =>
+          x.status ===
+          "fulfilled"
+      )
+      .flatMap(
+        x =>
+          x.value
+      );
+
+  const errors =
+    settled
+      .filter(
+        x =>
+          x.status ===
+          "rejected"
+      )
+      .map(
+        x =>
+          x.reason?.message ||
+          "source failed"
+      );
+
+  rows =
+    dedupeCandidates(
+      rows
+    ).slice(
+      0,
+      80
+    );
+
+  rows =
+    await enrichDetails(
+      rows
+    );
+
+  return {
+    rows,
+    errors,
+    variants
+  };
+}
+
+/* =========================================================
+   JSON PARSER
+========================================================= */
+
+function parseJsonArray(
+  text
+) {
+
+  const clean =
+    String(
+      text ||
+      ""
+    )
+      .replace(
+        /```json|```/gi,
+        ""
+      )
+      .trim();
+
+  const start =
+    clean.indexOf(
+      "["
+    );
+
+  if (
+    start < 0
+  ) {
+    return [];
+  }
+
+  const body =
+    clean.slice(
+      start
+    );
+
+  const end =
+    body.lastIndexOf(
+      "]"
+    );
+
+  if (
+    end >= 0
+  ) {
+
+    try {
+
+      return JSON.parse(
+        body.slice(
+          0,
+          end + 1
+        )
+      );
+
+    } catch {}
+  }
+
+  const lastObject =
+    body.lastIndexOf(
+      "}"
+    );
+
+  if (
+    lastObject >= 0
+  ) {
+
+    try {
+
+      return JSON.parse(
+        body.slice(
+          0,
+          lastObject + 1
+        ) +
+        "]"
+      );
+
     } catch {}
   }
 
   return [];
 }
 
-function normalizeVariableType(type = '') {
-  const k = key(type);
+/* =========================================================
+   VARIABLE PAY TYPE
+========================================================= */
 
-  if (k.includes('comis')) return 'Comisión';
-  if (k.includes('bono') || k.includes('bonus')) return 'Bono';
-  if (k.includes('incent') || k.includes('meta')) return 'Incentivo';
-  if (k.includes('auxil') || k.includes('allowance')) return 'Auxilio';
-  if (k.includes('prima')) return 'Prima extralegal';
-  if (k.includes('utilid') || k.includes('profit')) return 'Utilidades';
+function normalizeVariableType(
+  type = ""
+) {
 
-  return 'Otro';
+  const k =
+    key(
+      type
+    );
+
+  if (
+    k.includes(
+      "comis"
+    )
+  ) {
+    return "Comisión";
+  }
+
+  if (
+    k.includes(
+      "bono"
+    ) ||
+    k.includes(
+      "bonus"
+    )
+  ) {
+    return "Bono";
+  }
+
+  if (
+    k.includes(
+      "incent"
+    ) ||
+    k.includes(
+      "meta"
+    )
+  ) {
+    return "Incentivo";
+  }
+
+  if (
+    k.includes(
+      "auxil"
+    ) ||
+    k.includes(
+      "allowance"
+    )
+  ) {
+    return "Auxilio";
+  }
+
+  if (
+    k.includes(
+      "prima"
+    )
+  ) {
+    return "Prima extralegal";
+  }
+
+  if (
+    k.includes(
+      "utilid"
+    ) ||
+    k.includes(
+      "profit"
+    )
+  ) {
+    return "Utilidades";
+  }
+
+  return "Otro";
 }
 
-function normalizeOffer(raw, req, country) {
-  if (!raw || typeof raw !== 'object') return null;
+/* =========================================================
+   NORMALIZE OFFER
+========================================================= */
+
+function normalizeOffer(
+  raw,
+  req,
+  country
+) {
+
+  if (
+    !raw ||
+    typeof raw !==
+    "object"
+  ) {
+    return null;
+  }
 
   const url =
-    typeof raw.u === 'string' &&
-    /^https?:\/\//i.test(raw.u)
+    typeof raw.u ===
+      "string" &&
+    /^https?:\/\//i.test(
+      raw.u
+    )
       ? raw.u
       : null;
 
-  if (!url) return null;
+  if (!url) {
+    return null;
+  }
 
-  const period = key(raw.per || 'mes');
+  const period =
+    key(
+      raw.per ||
+      "mes"
+    );
 
   const factor = ({
     mes: 1,
@@ -138,155 +1226,267 @@ function normalizeOffer(raw, req, country) {
     day: 22,
     daily: 22,
 
-    hora: country.horas,
-    hour: country.horas,
-    hourly: country.horas
+    hora:
+      country.horas,
+
+    hour:
+      country.horas,
+
+    hourly:
+      country.horas
   })[period] || 1;
 
   const currency =
-    String(raw.m || country.moneda).toUpperCase();
+    String(
+      raw.m ||
+      country.moneda
+    )
+      .toUpperCase();
 
   const currencyFactor =
-    currency === country.moneda
+    currency ===
+      country.moneda
       ? 1
-      : currency === 'USD'
+      : currency ===
+        "USD"
         ? country.tasa
         : null;
 
-  const local = (value) => {
-    const x = n(value);
+  const local =
+    value => {
 
-    return x && currencyFactor
-      ? x * factor * currencyFactor
-      : null;
-  };
+      const x =
+        n(
+          value
+        );
 
-  let s1 = n(raw.s1);
-  let s2 = n(raw.s2);
+      return (
+        x &&
+        currencyFactor
+      )
+        ? x *
+          factor *
+          currencyFactor
+        : null;
+    };
 
-  if (s1 && !s2) s2 = s1;
-  if (s2 && !s1) s1 = s2;
+  let s1 =
+    n(
+      raw.s1
+    );
 
-  const min = local(s1);
-  const max = local(s2);
+  let s2 =
+    n(
+      raw.s2
+    );
+
+  if (
+    s1 &&
+    !s2
+  ) {
+    s2 = s1;
+  }
+
+  if (
+    s2 &&
+    !s1
+  ) {
+    s1 = s2;
+  }
+
+  const min =
+    local(
+      s1
+    );
+
+  const max =
+    local(
+      s2
+    );
 
   const fijo =
-    min && max
-      ? (min + max) / 2
+    min &&
+    max
+      ? (
+          min +
+          max
+        ) /
+        2
       : null;
 
-  const components = (
-    Array.isArray(raw.vc)
-      ? raw.vc
-      : []
-  )
-    .filter(Boolean)
-    .map(c => {
-      const componentPeriod =
-        key(c.per || 'mes');
+  const components =
+    (
+      Array.isArray(
+        raw.vc
+      )
+        ? raw.vc
+        : []
+    )
+      .filter(
+        Boolean
+      )
+      .map(
+        c => {
 
-      const componentFactor = ({
-        mes: 1,
-        month: 1,
-        monthly: 1,
+          const componentPeriod =
+            key(
+              c.per ||
+              "mes"
+            );
 
-        ano: 1 / 12,
-        year: 1 / 12,
-        yearly: 1 / 12,
-        annual: 1 / 12,
+          const componentFactor = ({
+            mes: 1,
+            month: 1,
+            monthly: 1,
 
-        quincena: 2,
-        fortnight: 2,
+            ano: 1 / 12,
+            year: 1 / 12,
+            yearly: 1 / 12,
+            annual: 1 / 12,
 
-        semana: 52 / 12,
-        week: 52 / 12,
-        weekly: 52 / 12,
+            quincena: 2,
+            fortnight: 2,
 
-        dia: 22,
-        day: 22,
-        daily: 22,
+            semana: 52 / 12,
+            week: 52 / 12,
+            weekly: 52 / 12,
 
-        hora: country.horas,
-        hour: country.horas,
-        hourly: country.horas
-      })[componentPeriod] || 1;
+            dia: 22,
+            day: 22,
+            daily: 22,
 
-      let amount = n(c.a);
+            hora:
+              country.horas,
 
-      if (amount && currencyFactor) {
-        amount =
-          amount *
-          currencyFactor *
-          componentFactor;
-      } else {
-        amount = null;
-      }
+            hour:
+              country.horas,
 
-      if (!amount && n(c.pc) && fijo) {
-        amount =
-          fijo *
-          n(c.pc) /
-          100 /
-          12;
-      }
+            hourly:
+              country.horas
+          })[
+            componentPeriod
+          ] || 1;
 
-      return {
-        tipo: normalizeVariableType(c.k),
-        monto: amount
-      };
-    });
+          let amount =
+            n(
+              c.a
+            );
+
+          if (
+            amount &&
+            currencyFactor
+          ) {
+
+            amount =
+              amount *
+              currencyFactor *
+              componentFactor;
+
+          } else {
+
+            amount =
+              null;
+          }
+
+          if (
+            !amount &&
+            n(c.pc) &&
+            fijo
+          ) {
+
+            amount =
+              fijo *
+              n(c.pc) /
+              100 /
+              12;
+          }
+
+          return {
+            tipo:
+              normalizeVariableType(
+                c.k
+              ),
+
+            monto:
+              amount
+          };
+        }
+      );
 
   const withAmounts =
-    components.filter(c => c.monto);
+    components.filter(
+      c =>
+        c.monto
+    );
 
   const variable =
     withAmounts.length
       ? withAmounts.reduce(
-          (sum, c) => sum + c.monto,
+          (
+            sum,
+            c
+          ) =>
+            sum +
+            c.monto,
           0
         )
       : null;
 
   const sinMonto =
-    components.length > 0 &&
+    components.length >
+      0 &&
     !variable;
 
   const total =
-    fijo && !sinMonto
-      ? fijo + (variable || 0)
+    fijo &&
+    !sinMonto
+      ? fijo +
+        (
+          variable ||
+          0
+        )
       : null;
 
   const ingles =
-    ENGLISH.has(raw.ing)
+    ENGLISH.has(
+      raw.ing
+    )
       ? raw.ing
-      : 'No especifica';
+      : "No especifica";
 
   const cargoNorm =
-    key(req.cargo);
+    key(
+      req.cargo
+    );
 
   return {
-    id: `${cargoNorm}|${req.pais}|${url}`,
+    id:
+      `${cargoNorm}|${req.pais}|${url}`,
 
-    cargo: cargoNorm,
-    cargoTexto: req.cargo,
+    cargo:
+      cargoNorm,
 
-    pais: req.pais,
+    cargoTexto:
+      req.cargo,
+
+    pais:
+      req.pais,
 
     ciudad:
       String(
         raw.c ||
         req.ciudad ||
-        'Remote'
+        "Remote"
       ).trim(),
 
     titulo:
       raw.t ||
-      'Sin título',
+      "Sin título",
 
     rol:
       raw.r ||
       raw.t ||
-      'Sin título',
+      "Sin título",
 
     empresa:
       raw.e ||
@@ -294,30 +1494,30 @@ function normalizeOffer(raw, req, country) {
 
     fuente:
       raw.f ||
-      (() => {
-        try {
-          return new URL(url)
-            .hostname
-            .replace(/^www\./, '');
-        } catch {
-          return null;
-        }
-      })(),
+      null,
 
     url,
 
     publicada:
-      /^\d{4}-\d{2}-\d{2}$/.test(raw.p || '')
+      /^\d{4}-\d{2}-\d{2}$/
+        .test(
+          raw.p ||
+          ""
+        )
         ? raw.p
         : null,
 
-    consultada: today(),
+    consultada:
+      today(),
 
     fijo,
+
     variable,
+
     total,
 
-    componentes: components,
+    componentes:
+      components,
 
     sinMonto,
 
@@ -325,8 +1525,14 @@ function normalizeOffer(raw, req, country) {
 
     exp:
       raw.x != null &&
-      Number.isFinite(Number(raw.x))
-        ? Number(raw.x)
+      Number.isFinite(
+        Number(
+          raw.x
+        )
+      )
+        ? Number(
+            raw.x
+          )
         : null,
 
     educacion:
@@ -334,13 +1540,23 @@ function normalizeOffer(raw, req, country) {
       null,
 
     funciones:
-      Array.isArray(raw.fn)
-        ? raw.fn.slice(0, 4)
+      Array.isArray(
+        raw.fn
+      )
+        ? raw.fn.slice(
+            0,
+            4
+          )
         : [],
 
     requisitos:
-      Array.isArray(raw.rq)
-        ? raw.rq.slice(0, 4)
+      Array.isArray(
+        raw.rq
+      )
+        ? raw.rq.slice(
+            0,
+            4
+          )
         : [],
 
     equivalente:
@@ -349,467 +1565,22 @@ function normalizeOffer(raw, req, country) {
     alerta:
       !!(
         fijo &&
-        fijo < country.smlv * 0.5
+        fijo <
+          country.smlv *
+          0.5
       ),
   };
 }
 
-async function fetchJson(url, init = {}) {
-  const r = await fetch(url, {
-    ...init,
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'MarketBenchmark/1.0',
-      ...(init.headers || {})
-    }
-  });
-
-  if (!r.ok) {
-    throw new Error(
-      `${new URL(url).hostname}: HTTP ${r.status}`
-    );
-  }
-
-  return r.json();
-}
-
-/* ============================
-   FUENTE 1: JOBICY
-============================ */
-
-async function sourceJobicy(req) {
-  const u =
-    new URL(
-      'https://jobicy.com/api/v2/remote-jobs'
-    );
-
-  u.searchParams.set(
-    'count',
-    '100'
-  );
-
-  u.searchParams.set(
-    'tag',
-    req.cargo
-  );
-
-  const data =
-    await fetchJson(
-      u.toString()
-    );
-
-  return (
-    data.jobs || []
-  ).map(j => ({
-    source: 'Jobicy',
-
-    title:
-      j.jobTitle,
-
-    company:
-      j.companyName,
-
-    location:
-      j.jobGeo ||
-      'Remote',
-
-    url:
-      j.url,
-
-    date:
-      j.pubDate
-        ? String(j.pubDate)
-            .slice(0, 10)
-        : null,
-
-    salaryMin:
-      j.salaryMin ??
-      null,
-
-    salaryMax:
-      j.salaryMax ??
-      null,
-
-    salaryCurrency:
-      j.salaryCurrency ??
-      null,
-
-    salaryPeriod:
-      j.salaryPeriod ??
-      null,
-
-    level:
-      j.jobLevel ??
-      null,
-
-    description:
-      stripHtml(
-        j.jobDescription ||
-        j.jobExcerpt ||
-        ''
-      ).slice(0, 7000),
-  }));
-}
-
-/* ============================
-   FUENTE 2: REMOTE OK
-============================ */
-
-async function sourceRemoteOK(req) {
-  const data =
-    await fetchJson(
-      'https://remoteok.com/api'
-    );
-
-  const rows =
-    Array.isArray(data)
-      ? data.filter(
-          x =>
-            x &&
-            x.position
-        )
-      : [];
-
-  const words =
-    key(req.cargo)
-      .split(' ')
-      .filter(
-        w =>
-          w.length > 2
-      );
-
-  return rows
-    .filter(j => {
-      const hay =
-        key(
-          `${j.position || ''} ${(j.tags || []).join(' ')} ${j.description || ''}`
-        );
-
-      return words.length
-        ? words.some(
-            w =>
-              hay.includes(w)
-          )
-        : true;
-    })
-
-    .slice(
-      0,
-      60
-    )
-
-    .map(j => ({
-      source:
-        'Remote OK',
-
-      title:
-        j.position,
-
-      company:
-        j.company,
-
-      location:
-        j.location ||
-        'Remote',
-
-      url:
-        j.url ||
-        j.apply_url,
-
-      date:
-        j.date
-          ? String(j.date)
-              .slice(0, 10)
-          : null,
-
-      salaryMin:
-        j.salary_min ??
-        null,
-
-      salaryMax:
-        j.salary_max ??
-        null,
-
-      salaryCurrency:
-        j.salary_currency ||
-        'USD',
-
-      salaryPeriod:
-        j.salary_min ||
-        j.salary_max
-          ? 'yearly'
-          : null,
-
-      level:
-        null,
-
-      description:
-        stripHtml(
-          j.description ||
-          ''
-        ).slice(0, 7000),
-    }));
-}
-
-/* ============================
-   FUENTE 3: REMOTIVE
-============================ */
-
-async function sourceRemotive(req) {
-  const u =
-    new URL(
-      'https://remotive.com/api/remote-jobs'
-    );
-
-  u.searchParams.set(
-    'search',
-    req.cargo
-  );
-
-  u.searchParams.set(
-    'limit',
-    '60'
-  );
-
-  const data =
-    await fetchJson(
-      u.toString()
-    );
-
-  return (
-    data.jobs || []
-  ).map(j => ({
-    source:
-      'Remotive',
-
-    title:
-      j.title,
-
-    company:
-      j.company_name,
-
-    location:
-      j.candidate_required_location ||
-      'Remote',
-
-    url:
-      j.url,
-
-    date:
-      j.publication_date
-        ? String(
-            j.publication_date
-          ).slice(0, 10)
-        : null,
-
-    salaryMin:
-      null,
-
-    salaryMax:
-      null,
-
-    salaryCurrency:
-      null,
-
-    salaryPeriod:
-      null,
-
-    level:
-      null,
-
-    description:
-      stripHtml(
-        `${j.salary || ''} ${j.description || ''}`
-      ).slice(0, 7000),
-  }));
-}
-
-/* ============================
-   FUENTE 4: ARBEITNOW
-============================ */
-
-async function sourceArbeitnow(req) {
-  const data =
-    await fetchJson(
-      'https://www.arbeitnow.com/api/job-board-api'
-    );
-
-  const words =
-    key(req.cargo)
-      .split(' ')
-      .filter(
-        w =>
-          w.length > 2
-      );
-
-  return (
-    data.data || []
-  )
-    .filter(j => {
-      const hay =
-        key(
-          `${j.title || ''} ${j.description || ''}`
-        );
-
-      return words.length
-        ? words.some(
-            w =>
-              hay.includes(w)
-          )
-        : true;
-    })
-
-    .slice(
-      0,
-      40
-    )
-
-    .map(j => ({
-      source:
-        'Arbeitnow',
-
-      title:
-        j.title,
-
-      company:
-        j.company_name,
-
-      location:
-        j.location ||
-        (
-          j.remote
-            ? 'Remote'
-            : ''
-        ),
-
-      url:
-        j.url,
-
-      date:
-        j.created_at
-          ? new Date(
-              j.created_at *
-              1000
-            )
-              .toISOString()
-              .slice(0, 10)
-          : null,
-
-      salaryMin:
-        null,
-
-      salaryMax:
-        null,
-
-      salaryCurrency:
-        null,
-
-      salaryPeriod:
-        null,
-
-      level:
-        null,
-
-      description:
-        stripHtml(
-          j.description ||
-          ''
-        ).slice(0, 7000),
-    }));
-}
-
-function dedupeCandidates(rows) {
-  const seen =
-    new Set();
-
-  const out =
-    [];
-
-  for (const r of rows) {
-    if (
-      !r?.url ||
-      !r?.title
-    ) {
-      continue;
-    }
-
-    const k =
-      key(
-        `${r.title}|${r.company}|${r.url}`
-      );
-
-    if (
-      seen.has(k)
-    ) {
-      continue;
-    }
-
-    seen.add(k);
-    out.push(r);
-  }
-
-  return out;
-}
-
-async function collectFreeJobs(req) {
-  const tasks = [
-    sourceJobicy(req),
-    sourceRemoteOK(req),
-    sourceRemotive(req),
-    sourceArbeitnow(req)
-  ];
-
-  const settled =
-    await Promise.allSettled(
-      tasks
-    );
-
-  const rows =
-    settled
-      .filter(
-        x =>
-          x.status ===
-          'fulfilled'
-      )
-      .flatMap(
-        x =>
-          x.value
-      );
-
-  const errors =
-    settled
-      .filter(
-        x =>
-          x.status ===
-          'rejected'
-      )
-      .map(
-        x =>
-          x.reason?.message ||
-          'source failed'
-      );
-
-  return {
-    rows:
-      dedupeCandidates(
-        rows
-      ).slice(
-        0,
-        80
-      ),
-
-    errors
-  };
-}
-
-/* ============================
-   PROMPT PARA GEMINI
-============================ */
+/* =========================================================
+   GEMINI PROMPT
+========================================================= */
 
 function promptFor(
   req,
   country,
-  candidates
+  candidates,
+  variants
 ) {
 
   const place =
@@ -819,8 +1590,12 @@ function promptFor(
 
   const compact =
     candidates.map(
-      (j, idx) => ({
-        i: idx,
+      (
+        j,
+        idx
+      ) => ({
+        i:
+          idx,
 
         source:
           j.source,
@@ -863,139 +1638,111 @@ function promptFor(
   return `
 You are a compensation analyst.
 
-You are NOT allowed to browse the web.
+You may NOT browse the web.
 
-Analyze only the job records supplied below.
+Analyze only the supplied public job records.
 
-Target role:
+SEARCHED ROLE:
 "${req.cargo}"
 
-Target market:
+EQUIVALENT TITLES USED FOR DISCOVERY:
+${variants.join(" | ")}
+
+TARGET MARKET:
 ${place}
 
-Preferred posting language:
-${LANG[req.idioma] || 'Spanish'}
+PREFERRED POSTING LANGUAGE:
+${LANG[req.idioma] || "Spanish"}
 
-The sources are free public job feeds and are mostly remote-job sources.
+IMPORTANT:
 
-Include a record only when:
+- The discovery layer searched public pages from Computrabajo, El Empleo, Indeed and Magneto when accessible, plus free remote feeds.
 
-1. The role is the requested role or genuinely comparable by duties.
+- Some records may be search/listing pages containing several jobs.
 
-2. Its stated location is compatible with ${country.nombre}${req.ciudad ? ` / ${req.ciudad}` : ''},
+- Extract only identifiable vacancies supported by the supplied text.
 
-OR it clearly permits:
+- Do not treat jobs about "caja de compensación" or unrelated uses of the word compensation as Compensation roles.
 
-Worldwide,
-Latin America,
-LATAM,
-Americas,
-or fully remote work that could include the target country.
+- A comparable role must have substantially similar duties, not just one matching word.
 
-Do NOT claim a job is located in the target city when the source says Remote or Worldwide.
+- For city searches, prefer the city but allow country-wide remote roles clearly available in the target country.
 
-Preserve the source location in c.
+- Preserve the actual source location.
+
+- Never pretend a Remote job is in the selected city.
 
 Return ONLY a JSON array.
 
-Maximum 20 objects.
+Maximum 30 objects.
 
-Each object must use exactly:
+Object schema:
 
 {
   "t": "original posting title",
   "r": "standard comparable role name",
   "e": "company or null",
-  "c": "location exactly as supported by source",
-  "f": "source name",
-  "u": "exact supplied source URL",
+  "c": "location supported by source",
+  "f": "source name exactly as supplied",
+  "u": "exact supplied URL",
   "p": "YYYY-MM-DD or null",
-  "s1": "fixed/base salary minimum as full number or null",
-  "s2": "fixed/base salary maximum as full number or null",
+  "s1": "fixed/base salary minimum full number or null",
+  "s2": "fixed/base salary maximum full number or null",
   "m": "ISO currency code or null",
   "per": "mes|año|quincena|semana|dia|hora|null",
 
   "vc": [
     {
       "k": "Comisión|Bono|Incentivo|Auxilio|Prima extralegal|Utilidades|Otro",
-      "a": "stated amount or null",
+      "a": "amount or null",
       "per": "mes|año|quincena|semana|dia|hora|null",
-      "pc": "annual percentage of base salary or null"
+      "pc": "annual percentage or null"
     }
   ],
 
-  "x": "minimum years of experience as number or null",
+  "x": "minimum years experience number or null",
 
-  "ing":
-  "No requerido|Básico|Intermedio|Avanzado|Bilingüe|No especifica",
+  "ing": "No requerido|Básico|Intermedio|Avanzado|Bilingüe|No especifica",
 
-  "ed":
-  "education level or null",
+  "ed": "education level or null",
 
   "fn": [
-    "3-6 word duty",
-    "3-6 word duty",
-    "3-6 word duty"
+    "duty",
+    "duty",
+    "duty"
   ],
 
   "rq": [
-    "short requirement",
-    "short requirement"
+    "requirement",
+    "requirement"
   ],
 
   "eq": true
 }
 
-Rules:
+STRICT RULES:
 
-- Use ONLY the supplied records.
+- Use ONLY supplied records.
 
-- Never invent URLs.
+- u must equal one supplied URL exactly.
 
-- Never invent employers.
+- f must equal the corresponding supplied source exactly.
 
-- Never invent compensation.
+- Never invent salary, employer, location, publication date, requirements or benefits.
 
-- Never invent dates.
+- If salary is "confidential", "competitive", DOE, or not shown, use null.
 
-- Never invent requirements.
+- Do not infer English unless explicitly required.
 
-- Never invent locations.
+- Do not mix salary from one vacancy with another.
 
-- Keep u exactly equal to a supplied URL.
+- If a listing page contains multiple jobs, only extract a job when title and compensation/location can be associated confidently.
 
-- Keep f exactly equal to its source.
+- Prefer jobs with salary.
 
-- Salary must come from explicit source fields or text.
+- Then relevance.
 
-- Never estimate salary.
-
-- If the source gives annual pay, use per="año".
-
-- Monthly pay = "mes".
-
-- Hourly pay = "hora".
-
-- s1 and s2 are fixed/base pay only.
-
-- Variable pay belongs only in vc.
-
-- "Competitive",
-  "DOE",
-  "depending on experience",
-  or missing salary
-  = null.
-
-- If English is not explicitly required,
-  use "No especifica".
-
-- eq=true only when the title differs from the searched role but duties are genuinely comparable.
-
-- Prefer records with published salary.
-
-- Then prefer relevance.
-
-- Then prefer recency.
+- Then recency.
 
 SOURCE RECORDS:
 
@@ -1003,11 +1750,13 @@ ${JSON.stringify(compact)}
 `;
 }
 
-/* ============================
-   GEMINI + RETRY + FALLBACK
-============================ */
+/* =========================================================
+   GEMINI CALL
+========================================================= */
 
-async function sleep(ms) {
+async function sleep(
+  ms
+) {
   return new Promise(
     resolve =>
       setTimeout(
@@ -1017,11 +1766,12 @@ async function sleep(ms) {
   );
 }
 
-async function callGeminiModel(
+async function callGemini(
   model,
   req,
   env,
-  candidates
+  candidates,
+  variants
 ) {
 
   const country =
@@ -1037,13 +1787,13 @@ async function callGeminiModel(
       endpoint,
       {
         method:
-          'POST',
+          "POST",
 
         headers: {
-          'content-type':
-            'application/json',
+          "content-type":
+            "application/json",
 
-          'x-goog-api-key':
+          "x-goog-api-key":
             env.GEMINI_API_KEY,
         },
 
@@ -1052,7 +1802,7 @@ async function callGeminiModel(
             contents: [
               {
                 role:
-                  'user',
+                  "user",
 
                 parts: [
                   {
@@ -1060,10 +1810,11 @@ async function callGeminiModel(
                       promptFor(
                         req,
                         country,
-                        candidates
+                        candidates,
+                        variants
                       )
                   }
-                ]
+                ],
               }
             ],
 
@@ -1072,7 +1823,7 @@ async function callGeminiModel(
                 8192,
 
               responseMimeType:
-                'application/json',
+                "application/json",
             },
           }),
       }
@@ -1114,10 +1865,10 @@ async function callGeminiModel(
       .map(
         p =>
           p.text ||
-          ''
+          ""
       )
       .join(
-        '\n'
+        "\n"
       );
 
   const parsed =
@@ -1125,11 +1876,13 @@ async function callGeminiModel(
       text
     );
 
-  const suppliedUrls =
-    new Set(
+  const supplied =
+    new Map(
       candidates.map(
-        c =>
-          c.url
+        c => [
+          c.url,
+          c.source
+        ]
       )
     );
 
@@ -1137,10 +1890,13 @@ async function callGeminiModel(
     parsed
       .filter(
         o =>
-          suppliedUrls
-            .has(
-              o?.u
-            )
+          supplied.has(
+            o?.u
+          ) &&
+          supplied.get(
+            o.u
+          ) ===
+          o.f
       )
       .map(
         o =>
@@ -1158,105 +1914,96 @@ async function callGeminiModel(
     ofertas:
       [
         ...new Map(
-          normalized
-            .map(
-              o => [
-                o.id,
-                o
-              ]
-            )
+          normalized.map(
+            o => [
+              o.id,
+              o
+            ]
+          )
         ).values()
       ],
 
-    model
+    model,
   };
 }
+
+/* =========================================================
+   GEMINI RETRY
+========================================================= */
 
 async function analyzeWithGemini(
   req,
   env,
-  candidates
+  candidates,
+  variants
 ) {
 
-  const models = [
+  const model =
     env.GEMINI_MODEL ||
-      'gemini-3.8-flash',
+    "gemini-3.8-flash";
 
-    'gemini-3.7-flash',
-
-    'gemini-3.5-flash',
-
-    'gemini-3.5-flash-lite'
-  ];
-
-  const uniqueModels =
-    [
-      ...new Set(
-        models
-      )
-    ];
-
-  let lastError =
-    null;
+  let lastError;
 
   for (
-    const model
-    of uniqueModels
+    let attempt = 0;
+    attempt < 3;
+    attempt++
   ) {
 
-    for (
-      let attempt = 0;
-      attempt < 2;
-      attempt++
-    ) {
+    try {
 
-      try {
+      return await callGemini(
+        model,
+        req,
+        env,
+        candidates,
+        variants
+      );
 
-        return await callGeminiModel(
-          model,
-          req,
-          env,
-          candidates
-        );
+    } catch (e) {
 
-      } catch (e) {
+      lastError =
+        e;
 
-        lastError =
-          e;
-
-        const retryable =
-          e.status === 429 ||
-          e.status === 500 ||
-          e.status === 502 ||
-          e.status === 503 ||
-          e.status === 504;
-
-        if (
-          !retryable
-        ) {
-          break;
-        }
-
-        if (
-          attempt === 0
-        ) {
-          await sleep(
-            1500
+      const retryable =
+        [
+          429,
+          500,
+          502,
+          503,
+          504
+        ]
+          .includes(
+            e.status
           );
-        }
+
+      if (
+        !retryable
+      ) {
+        break;
       }
+
+      await sleep(
+        1200 *
+        (
+          attempt +
+          1
+        )
+      );
     }
   }
 
-  throw new Error(
-    lastError?.message ||
-    'All available Gemini models are temporarily unavailable. Please try again shortly.'
+  throw (
+    lastError ||
+    new Error(
+      "Gemini is temporarily unavailable."
+    )
   );
 }
 
-/* ============================
+/* =========================================================
    WORKER
-============================ */
+========================================================= */
 
 export default {
 
@@ -1270,11 +2017,11 @@ export default {
         request.url
       );
 
-    /* CORS */
+    /* OPTIONS */
 
     if (
       request.method ===
-      'OPTIONS'
+      "OPTIONS"
     ) {
 
       return new Response(
@@ -1284,15 +2031,15 @@ export default {
             204,
 
           headers: {
-            'access-control-allow-origin':
-              '*',
+            "access-control-allow-origin":
+              "*",
 
-            'access-control-allow-methods':
-              'POST,GET,OPTIONS',
+            "access-control-allow-methods":
+              "POST,GET,OPTIONS",
 
-            'access-control-allow-headers':
-              'content-type'
-          }
+            "access-control-allow-headers":
+              "content-type",
+          },
         }
       );
     }
@@ -1301,7 +2048,7 @@ export default {
 
     if (
       url.pathname ===
-      '/api/health'
+      "/api/health"
     ) {
 
       return json({
@@ -1313,20 +2060,31 @@ export default {
 
         model:
           env.GEMINI_MODEL ||
-          'gemini-3.8-flash',
+          "gemini-3.8-flash",
 
         searchMode:
-          'free-public-feeds',
+          "latam-public-portals-free",
 
-        sources: [
-          'Jobicy',
-          'Remote OK',
-          'Remotive',
-          'Arbeitnow'
+        primarySources: [
+          "Computrabajo",
+          "El Empleo",
+          "Indeed",
+          "Magneto"
         ],
 
-        fallbackEnabled:
-          true
+        complementarySources: [
+          "Jobicy",
+          "Remotive"
+        ],
+
+        googlePaidSearchUsed:
+          false,
+
+        equivalentTitleExpansion:
+          true,
+
+        retryEnabled:
+          true,
       });
     }
 
@@ -1334,18 +2092,18 @@ export default {
 
     if (
       url.pathname ===
-      '/api/search'
+      "/api/search"
     ) {
 
       if (
         request.method !==
-        'POST'
+        "POST"
       ) {
 
         return json(
           {
             error:
-              'Method not allowed.'
+              "Method not allowed."
           },
           405
         );
@@ -1358,7 +2116,7 @@ export default {
         return json(
           {
             error:
-              'GEMINI_API_KEY is not configured in Cloudflare.'
+              "GEMINI_API_KEY is not configured in Cloudflare."
           },
           500
         );
@@ -1377,7 +2135,7 @@ export default {
         return json(
           {
             error:
-              'Invalid JSON request.'
+              "Invalid JSON request."
           },
           400
         );
@@ -1388,7 +2146,7 @@ export default {
         cargo:
           String(
             body?.cargo ||
-            ''
+            ""
           )
             .trim()
             .slice(
@@ -1399,7 +2157,7 @@ export default {
         pais:
           String(
             body?.pais ||
-            ''
+            ""
           )
             .trim()
             .toUpperCase(),
@@ -1407,7 +2165,7 @@ export default {
         ciudad:
           String(
             body?.ciudad ||
-            ''
+            ""
           )
             .trim()
             .slice(
@@ -1418,7 +2176,7 @@ export default {
         idioma:
           String(
             body?.idioma ||
-            'es'
+            "es"
           )
             .trim()
             .toLowerCase(),
@@ -1432,7 +2190,7 @@ export default {
         return json(
           {
             error:
-              'Enter a valid job title.'
+              "Enter a valid job title."
           },
           400
         );
@@ -1447,7 +2205,7 @@ export default {
         return json(
           {
             error:
-              'Unsupported country.'
+              "Unsupported country."
           },
           400
         );
@@ -1460,13 +2218,13 @@ export default {
       ) {
 
         req.idioma =
-          'es';
+          "es";
       }
 
       try {
 
         const collected =
-          await collectFreeJobs(
+          await collectJobs(
             req
           );
 
@@ -1477,7 +2235,10 @@ export default {
           return json(
             {
               error:
-                'No matching vacancies were returned by the free public job feeds. Try a more common English job title or broaden the location.'
+                "No public vacancies could be retrieved from the free sources right now. Try again shortly or broaden the location.",
+
+              queriesUsed:
+                collected.variants,
             },
             404
           );
@@ -1487,7 +2248,8 @@ export default {
           await analyzeWithGemini(
             req,
             env,
-            collected.rows
+            collected.rows,
+            collected.variants
           );
 
         if (
@@ -1497,13 +2259,13 @@ export default {
           return json(
             {
               error:
-                'The free sources returned vacancies, but none could be verified as comparable for this role/location. Try the whole country, English search language, or a more common job title.',
-
-              freeSourcesChecked:
-                4,
+                "Public pages returned vacancies, but none could be verified as genuinely comparable to this role. Try the whole country or another common title.",
 
               candidatesReviewed:
                 collected.rows.length,
+
+              queriesUsed:
+                collected.variants,
             },
             404
           );
@@ -1513,16 +2275,16 @@ export default {
           ...result,
 
           searchMode:
-            'free-public-feeds',
+            "latam-public-portals-free",
 
           candidatesReviewed:
             collected.rows.length,
 
+          queriesUsed:
+            collected.variants,
+
           sourceWarnings:
             collected.errors,
-
-          fallbackEnabled:
-            true
         });
 
       } catch (e) {
@@ -1531,7 +2293,7 @@ export default {
           {
             error:
               e?.message ||
-              'Search failed.'
+              "Search failed."
           },
           502
         );
